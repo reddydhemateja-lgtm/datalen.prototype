@@ -89,7 +89,6 @@ function analyzeData(rows) {
     else seen.add(key);
   });
 
-  // Correlation matrix
   const numCols = columns.filter(c => report[c].type === 'numeric');
   const correlations = {};
   if (numCols.length >= 2) {
@@ -171,28 +170,27 @@ function generateInsights(rows, report) {
     const r = report[col];
     insights.push({ type:'stat', title:`${col} — Statistics`, body:`Range: ${r.min} → ${r.max} | Mean: ${r.mean} | Median: ${r.median} | Std Dev: ${r.std}` });
     if (r.skewness && Math.abs(r.skewness) > 0.5)
-      insights.push({ type:'info', title:`${col} is ${r.skewness>0?'right':'left'}-skewed`, body:`Skewness of ${r.skewness}. The ${r.skewness>0?'higher':'lower'} end has more extreme values, which can affect averages.` });
+      insights.push({ type:'info', title:`${col} is ${r.skewness>0?'right':'left'}-skewed`, body:`Skewness of ${r.skewness}. The ${r.skewness>0?'higher':'lower'} end has more extreme values.` });
     if (r.outliers > 0)
-      insights.push({ type:'warning', title:`${r.outliers} Outlier(s) in ${col}`, body:`IQR range: [${r.q1}, ${r.q3}]. Extreme values found: ${r.outlierVals.join(', ')}. Use Auto-Clean to handle these.` });
+      insights.push({ type:'warning', title:`${r.outliers} Outlier(s) in ${col}`, body:`IQR range: [${r.q1}, ${r.q3}]. Extreme values: ${r.outlierVals.join(', ')}. Use Auto-Clean to fix.` });
   });
 
   catCols.forEach(col => {
     const top = report[col].topValues?.[0];
     if (top) {
       const pct = ((top.count / rows.length) * 100).toFixed(1);
-      insights.push({ type:'info', title:`Dominant: "${top.value}" in ${col}`, body:`Appears in ${pct}% of rows (${top.count}/${rows.length}). ${pct > 60 ? 'High concentration — column may not add much variance.' : ''}` });
+      insights.push({ type:'info', title:`Dominant: "${top.value}" in ${col}`, body:`Appears in ${pct}% of rows (${top.count}/${rows.length}).` });
     }
-    insights.push({ type:'stat', title:`${col} Diversity`, body:`${report[col].uniqueCount} unique values. Shannon entropy: ${report[col].entropy} bits — ${report[col].entropy < 1 ? 'very uniform' : report[col].entropy < 2 ? 'moderate spread' : 'highly diverse'}.` });
+    insights.push({ type:'stat', title:`${col} Diversity`, body:`${report[col].uniqueCount} unique values. Entropy: ${report[col].entropy} bits.` });
   });
 
   const nullCols = columns.filter(c => report[c].nullCount > 0);
   if (nullCols.length)
-    insights.push({ type:'warning', title:'Missing Data', body:`${nullCols.map(c=>`${c} (${report[c].nullPct}%)`).join(', ')} — total ${nullCols.reduce((s,c)=>s+report[c].nullCount,0)} missing cells.` });
+    insights.push({ type:'warning', title:'Missing Data', body:`${nullCols.map(c=>`${c} (${report[c].nullPct}%)`).join(', ')}` });
   else
-    insights.push({ type:'success', title:'Complete Dataset', body:'Every cell is populated — excellent data completeness!' });
+    insights.push({ type:'success', title:'Complete Dataset', body:'Every cell is populated — excellent data quality!' });
 
-  insights.push({ type:'stat', title:'Dataset Overview', body:`${rows.length.toLocaleString()} rows × ${columns.length} columns = ${(rows.length*columns.length).toLocaleString()} data points. ${rows.length<100?'Small sample size.':rows.length>10000?'Large dataset — patterns are reliable.':'Good working size.'}` });
-
+  insights.push({ type:'stat', title:'Dataset Overview', body:`${rows.length.toLocaleString()} rows × ${columns.length} columns = ${(rows.length*columns.length).toLocaleString()} data points.` });
   return insights;
 }
 
@@ -209,7 +207,6 @@ function buildChartData(rows, report) {
     const sorted=Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,10);
     charts.push({ type:'bar', title:`${numCol} by ${catCol}`, labels:sorted.map(e=>e[0]), data:sorted.map(e=>+e[1].toFixed(2)), xLabel:catCol, yLabel:numCol });
   }
-
   if (numCols.length) {
     const col=numCols[0];
     const vals=rows.map(r=>Number(r[col])).filter(v=>!isNaN(v));
@@ -220,26 +217,24 @@ function buildChartData(rows, report) {
     vals.forEach(v=>{ const i=Math.min(Math.floor((v-min)/binSize),bins-1); counts[i]++; });
     charts.push({ type:'histogram', title:`Distribution of ${col}`, labels:counts.map((_,i)=>+(min+i*binSize).toFixed(2)), data:counts, xLabel:col, yLabel:'Frequency' });
   }
-
   if (catCols.length) {
     const col=catCols[0];
     const top=report[col].topValues?.slice(0,6)||[];
     if(top.length) charts.push({ type:'doughnut', title:`${col} Breakdown`, labels:top.map(t=>t.value), data:top.map(t=>t.count) });
   }
-
   if (numCols.length >= 2) {
     const col1=numCols[0], col2=numCols[1];
     const sample=rows.slice(0,30);
     charts.push({ type:'line', title:`${col1} vs ${col2} Trend`, labels:sample.map((_,i)=>`#${i+1}`), datasets:[{label:col1,data:sample.map(r=>Number(r[col1])||0)},{label:col2,data:sample.map(r=>Number(r[col2])||0)}] });
   }
-
   if (numCols.length >= 2) {
     const col1=numCols[0], col2=numCols[1];
     charts.push({ type:'scatter', title:`${col1} vs ${col2} Scatter`, data:rows.slice(0,80).map(r=>({x:Number(r[col1])||0,y:Number(r[col2])||0})), xLabel:col1, yLabel:col2 });
   }
-
   return charts;
 }
+
+// ── ROUTES ────────────────────────────────────────────────────────────────────
 
 app.post('/api/upload', upload.single('file'), (req, res) => {
   try {
@@ -275,11 +270,11 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { question, context, history } = req.body;
     if (!question) return res.status(400).json({ error: 'No question provided' });
-    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
+    const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 
-    if (!ANTHROPIC_KEY) {
+    if (!GEMINI_KEY) {
       const q = question.toLowerCase();
-      let answer = "No API key found. Add ANTHROPIC_API_KEY as an environment variable for AI-powered answers.";
+      let answer = "Add GEMINI_API_KEY in Render environment variables to enable AI chat.";
       if (context) {
         const { rowCount, colCount, qualityScore, columns, report } = context;
         const numCols = columns?.filter(c=>report?.[c]?.type==='numeric')||[];
@@ -287,32 +282,43 @@ app.post('/api/chat', async (req, res) => {
         else if (q.includes('quality')||q.includes('score')) answer=`Quality score: ${qualityScore}%. ${qualityScore>=80?'Great quality!':qualityScore>=60?'Moderate — some cleaning needed.':'Needs significant cleaning.'}`;
         else if (q.includes('column')||q.includes('field')) answer=`${colCount} columns: ${columns?.join(', ')}.`;
         else if (q.includes('outlier')) answer=numCols.length?`Outliers: ${numCols.map(c=>`${c}: ${report[c].outliers||0}`).join(', ')}`:'No numeric columns.';
-        else if (q.includes('missing')||q.includes('null')) answer=`Missing: ${columns?.filter(c=>report?.[c]?.nullCount>0).map(c=>`${c} (${report[c].nullPct}%)`).join(', ')||'None — great!'}`;
+        else if (q.includes('missing')||q.includes('null')) answer=`Missing: ${columns?.filter(c=>report?.[c]?.nullCount>0).map(c=>`${c} (${report[c].nullPct}%)`).join(', ')||'None!'}`;
         else if (q.includes('mean')||q.includes('average')) answer=numCols.length?`Means: ${numCols.map(c=>`${c}=${report[c].mean}`).join(', ')}`:'No numeric columns.';
-        else answer=`Dataset: ${rowCount?.toLocaleString()} rows × ${colCount} columns, ${qualityScore}% quality. Ask me about columns, outliers, missing values, or statistics!`;
+        else answer=`Dataset: ${rowCount?.toLocaleString()} rows × ${colCount} columns, ${qualityScore}% quality. Ask about columns, outliers, missing values, or stats!`;
       }
       return res.json({ answer });
     }
 
-    const messages = [];
-    if (history?.length) history.slice(-10).forEach(h=>messages.push({role:h.role,content:h.content}));
-    messages.push({ role:'user', content:question });
+    // Build conversation for Gemini
+    const contextStr = context ? `Dataset context:\n${JSON.stringify(context, null, 2)}` : '';
+    const historyStr = history?.slice(-6).map(h => `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}`).join('\n') || '';
+    const prompt = `You are DataLens AI, an expert data analyst assistant. Answer concisely in 2-4 sentences. Reference specific numbers from the dataset when possible. Suggest actionable next steps.
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'x-api-key':ANTHROPIC_KEY, 'anthropic-version':'2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        system: `You are DataLens AI, an expert data analyst. Analyze the user's dataset and provide concise, insightful answers (2-4 sentences). Reference specific numbers. Suggest actions when relevant.\n\nDataset context:\n${JSON.stringify(context, null, 2)}`,
-        messages
-      })
-    });
+${contextStr}
+
+${historyStr ? 'Previous conversation:\n' + historyStr : ''}
+
+User: ${question}
+Assistant:`;
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 500, temperature: 0.7 }
+        })
+      }
+    );
+
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
-    res.json({ answer: data.content?.[0]?.text || 'Could not generate answer.' });
+    const answer = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Could not generate answer.';
+    res.json({ answer });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/health', (_, res) => res.json({ status:'ok', version:'2.0.0', ai:!!process.env.ANTHROPIC_API_KEY }));
+app.get('/api/health', (_, res) => res.json({ status: 'ok', version: '2.0.0', ai: !!process.env.GEMINI_API_KEY }));
 app.listen(PORT, () => console.log(`✅ DataLens AI v2 running at http://localhost:${PORT}`));
